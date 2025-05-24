@@ -1,0 +1,115 @@
+@startuml NGINX Architecture
+
+' 使用皮肤
+skinparam {
+  DefaultFontName "Arial"
+  BackgroundColor white
+  ArrowColor black
+  BorderColor black
+}
+
+' 定义组件
+package "NGINX Core" as core {
+  [Configuration] as config
+  [Memory Management] as memory
+  [Data Structures] as data
+  [Process Management] as process
+}
+
+package "Event Processing" as event {
+  [Event Core] as eventCore
+  [Event Modules] as eventModules
+  [Connection Management] as connection
+  [SSL/TLS] as ssl
+  [QUIC] as quic
+}
+
+package "HTTP" as http {
+  [HTTP Core] as httpCore
+  [HTTP Request Processing] as httpRequest
+  [HTTP Modules] as httpModules
+  [HTTP/2] as http2
+  [HTTP/3] as http3
+  [Upstream] as upstream
+}
+
+package "Mail" as mail {
+  [Mail Core] as mailCore
+  [IMAP] as imap
+  [POP3] as pop3
+  [SMTP] as smtp
+}
+
+package "Stream" as stream {
+  [Stream Core] as streamCore
+  [Stream Modules] as streamModules
+}
+
+package "OS-Specific" as os {
+  [Unix] as unix
+  [Windows] as windows
+}
+
+' 定义关系
+core <-- event
+core <-- http
+core <-- mail
+core <-- stream
+core <-- os
+
+event <-- http
+event <-- mail
+event <-- stream
+
+eventCore <-- eventModules
+eventCore <-- connection
+eventCore <-- ssl
+eventCore <-- quic
+
+httpCore <-- httpRequest
+httpCore <-- httpModules
+httpCore <-- http2
+httpCore <-- http3
+httpCore <-- upstream
+
+' 添加注释
+note right of core
+  核心模块提供基础功能：
+  - 配置解析
+  - 内存管理
+  - 进程管理
+  - 基础数据结构
+end note
+
+note right of event
+  事件模块处理网络事件：
+  - 事件循环
+  - 连接管理
+  - 定时器
+  - SSL/TLS 处理
+  - QUIC 协议支持
+end note
+
+note right of http
+  HTTP 模块处理 HTTP 请求：
+  - 请求解析
+  - 响应生成
+  - 内容过滤
+  - 上游代理
+  - HTTP/2 和 HTTP/3 支持
+end note
+
+note right of mail
+  邮件模块处理邮件协议：
+  - IMAP
+  - POP3
+  - SMTP
+end note
+
+note right of stream
+  Stream 模块处理 TCP/UDP 流量：
+  - 通用 TCP/UDP 代理
+  - 负载均衡
+end note
+
+@enduml

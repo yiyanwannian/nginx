@@ -1,0 +1,203 @@
+@startuml nginx_request_flow
+!theme plain
+title NGINX 请求处理流程图
+
+' 颜色定义
+!$INIT_COLOR = "#F3E5F5"
+!$REQUEST_COLOR = "#E1F5FE"
+!$PROCESS_COLOR = "#E8F5E8"
+!$RESPONSE_COLOR = "#FFF3E0"
+!$ERROR_COLOR = "#FFEBEE"
+!$LOG_COLOR = "#E0F2F1"
+
+skinparam participant {
+    BackgroundColor White
+    BorderColor Gray
+}
+
+skinparam actor {
+    BackgroundColor #E1F5FE
+    BorderColor #81D4FA
+}
+
+skinparam note {
+    BackgroundColor #FFFDE7
+    BorderColor #FFE082
+}
+
+skinparam sequence {
+    GroupBackgroundColor transparent
+    GroupBodyBackgroundColor transparent
+    GroupBorderColor Gray
+    GroupBorderThickness 1
+
+    LifeLineBorderColor Gray
+    LifeLineBackgroundColor White
+
+    ArrowColor #666666
+    ArrowThickness 1
+}
+
+' 定义参与者
+actor Client
+participant Master #F3E5F5
+participant Worker #FFF3E0
+participant EventLoop #E8F5E8
+participant HTTPCore #FFEBEE
+participant Handler #E0F2F1
+participant Filter #F1F8E9
+participant Upstream #EDE7F6
+participant Backend #FFF8E1
+
+' 启动阶段
+group $INIT_COLOR 启动阶段
+    Master -> Master : 读取配置文件
+    Master -> Master : 初始化模块
+    Master -> Worker : 创建Worker进程
+    Worker -> EventLoop : 初始化事件循环
+    Worker -> Worker : 绑定监听端口
+end
+
+' 请求处理阶段
+group $REQUEST_COLOR 请求接收
+    Client -> Worker : 建立TCP连接
+    Worker -> EventLoop : 注册连接事件
+    EventLoop -> EventLoop : epoll_wait()等待事件
+
+    Client -> Worker : 发送HTTP请求
+    EventLoop -> EventLoop : 检测到读事件
+    EventLoop -> HTTPCore : 触发读事件处理
+end
+
+group $REQUEST_COLOR 请求解析
+    HTTPCore -> HTTPCore : 解析请求行
+    note right : GET /path HTTP/1.1\n📁 ngx_http_parse_request_line()\n📁 src/http/ngx_http_parse.c
+
+    HTTPCore -> HTTPCore : 解析请求头
+    note right : Host, User-Agent等\n📁 ngx_http_parse_header_line()\n📁 src/http/ngx_http_parse.c
+
+    HTTPCore -> HTTPCore : 创建请求对象
+    note right : ngx_http_request_t\n📁 ngx_http_create_request()\n📁 src/http/ngx_http_request.c
+
+    HTTPCore -> HTTPCore : 查找虚拟主机
+    note right : 📁 ngx_http_set_virtual_server()\n📁 src/http/ngx_http_request.c
+
+    HTTPCore -> HTTPCore : 匹配location配置
+    note right : 📁 ngx_http_core_find_location()\n📁 src/http/ngx_http_core_module.c
+end
+
+group $PROCESS_COLOR 请求处理
+    HTTPCore -> Handler : 调用内容处理器
+    note right : 📁 ngx_http_handler()\n📁 src/http/ngx_http_request.c
+
+    alt 静态文件请求
+        Handler -> Handler : 检查文件存在性
+        note right : 📁 ngx_http_static_handler()\n📁 src/http/modules/ngx_http_static_module.c
+        Handler -> Handler : 设置响应头
+        Handler -> Handler : 准备文件内容
+        note right : 📁 sendfile系统调用
+    else 代理请求
+        Handler -> Upstream : 创建upstream请求
+        note right : 📁 ngx_http_upstream_create()\n📁 src/http/ngx_http_upstream.c
+        Upstream -> Upstream : 选择后端服务器
+        note right : 负载均衡算法\n📁 ngx_http_upstream_get_peer()\n📁 src/http/ngx_http_upstream_round_robin.c
+
+        Upstream -> Backend : 转发请求
+        note right : 📁 ngx_http_upstream_send_request()\n📁 src/http/ngx_http_upstream.c
+        Backend -> Upstream : 返回响应
+        Upstream -> Handler : 传递响应数据
+        note right : 📁 ngx_http_upstream_process_header()\n📁 src/http/ngx_http_upstream.c
+    else 动态内容
+        Handler -> Handler : 执行业务逻辑
+        Handler -> Handler : 生成响应内容
+        note right : 📁 FastCGI/uWSGI/gRPC等协议
+    end
+end
+
+group $RESPONSE_COLOR 响应过滤
+    Handler -> Filter : 传递响应到过滤链
+    note right : 📁 ngx_http_output_filter()\n📁 src/http/ngx_http_core_module.c
+
+    loop 过滤器链处理
+        Filter -> Filter : 头部过滤器
+        note right : 修改响应头\n📁 ngx_http_header_filter()\n📁 src/http/ngx_http_header_filter_module.c
+
+        Filter -> Filter : 内容过滤器
+        note right : gzip压缩、字符集转换等\n📁 src/http/modules/ngx_http_gzip_filter_module.c
+    end
+
+    Filter -> HTTPCore : 返回处理后的响应
+end
+
+group $RESPONSE_COLOR 响应发送
+    HTTPCore -> EventLoop : 注册写事件
+    note right : 📁 ngx_add_event()\n📁 src/event/ngx_event.c
+    EventLoop -> EventLoop : epoll_wait()等待写就绪
+    EventLoop -> HTTPCore : 触发写事件
+
+    HTTPCore -> Client : 发送响应头
+    note right : 📁 ngx_http_write_filter()\n📁 src/http/ngx_http_write_filter_module.c
+    HTTPCore -> Client : 发送响应体
+    note right : 📁 sendfile/writev系统调用
+
+    alt Keep-Alive连接
+        HTTPCore -> EventLoop : 继续监听读事件
+        note right : 复用连接处理下一个请求\n📁 ngx_http_set_keepalive()\n📁 src/http/ngx_http_request.c
+    else 关闭连接
+        HTTPCore -> HTTPCore : 清理请求资源
+        note right : 📁 ngx_http_close_request()\n📁 src/http/ngx_http_request.c
+        HTTPCore -> EventLoop : 关闭连接
+        note right : 📁 ngx_close_connection()\n📁 src/core/ngx_connection.c
+    end
+end
+
+' 错误处理
+group $ERROR_COLOR 错误处理 [可选]
+    HTTPCore -> HTTPCore : 检测错误状态
+    HTTPCore -> Handler : 调用错误处理器
+    Handler -> Filter : 生成错误页面
+    Filter -> Client : 返回错误响应
+end
+
+' 日志记录
+group $LOG_COLOR 日志记录
+    HTTPCore -> HTTPCore : 记录访问日志
+    note right : 请求时间、状态码、字节数等
+
+    HTTPCore -> HTTPCore : 记录错误日志
+    note right : 错误信息、调试信息等
+end
+
+' 性能优化点
+note over EventLoop
+    性能优化点：
+    - 事件驱动，非阻塞I/O
+    - 内存池管理
+    - sendfile零拷贝
+    - 连接复用
+end note
+
+note over Handler
+    模块化设计：
+    - 可插拔的处理器
+    - 灵活的配置
+    - 第三方模块支持
+end note
+
+note over Filter
+    过滤器链：
+    - 响应内容处理
+    - 压缩和编码
+    - 安全过滤
+    - 缓存控制
+end note
+
+note over Upstream
+    负载均衡：
+    - Round Robin
+    - IP Hash
+    - Least Connections
+    - 健康检查
+end note
+
+@enduml

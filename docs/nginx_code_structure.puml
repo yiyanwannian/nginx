@@ -1,0 +1,277 @@
+@startuml nginx_code_structure
+!theme plain
+title NGINX 源代码结构图
+
+skinparam rectangle {
+    BackgroundColor<<file>> White
+    BorderColor Gray
+}
+
+' 根目录
+package "nginx/" as Root {
+    
+    ' 源代码目录
+    package "src/" as SrcDir #E3F2FD {
+
+        ' 核心模块
+        package "core/" as CoreDir #E3F2FD {
+            rectangle "nginx.c" as NginxMain<<file>>
+            note bottom of NginxMain : 主程序入口\nmain()函数
+
+            rectangle "nginx.h" as NginxHeader<<file>>
+            note bottom of NginxHeader : 版本定义\n基本常量
+
+            rectangle "ngx_cycle.c/.h" as CycleFiles<<file>>
+            note bottom of CycleFiles : 生命周期管理\nngx_cycle_t结构
+
+            rectangle "ngx_module.c/.h" as ModuleFiles<<file>>
+            note bottom of ModuleFiles : 模块系统\nngx_module_t结构
+
+            rectangle "ngx_conf_file.c/.h" as ConfFiles<<file>>
+            note bottom of ConfFiles : 配置文件解析\nngx_conf_t结构
+
+            rectangle "ngx_connection.c/.h" as ConnFiles<<file>>
+            note bottom of ConnFiles : 连接管理\nngx_connection_t结构
+
+            rectangle "ngx_palloc.c/.h" as PoolFiles<<file>>
+            note bottom of PoolFiles : 内存池管理\nngx_pool_t结构
+
+            rectangle "ngx_log.c/.h" as LogFiles<<file>>
+            note bottom of LogFiles : 日志系统\nngx_log_t结构
+        }
+        
+        ' 事件处理
+        package "event/" as EventDir #E8F5E8 {
+            rectangle "ngx_event.c/.h" as EventCore<<file>>
+            note bottom of EventCore : 事件核心\n事件循环主逻辑
+
+            rectangle "ngx_event_timer.c/.h" as TimerFiles<<file>>
+            note bottom of TimerFiles : 定时器管理\n红黑树实现
+
+            package "modules/" as EventModules {
+                rectangle "ngx_epoll_module.c" as EpollMod<<file>>
+                note bottom of EpollMod : Linux epoll支持\n高性能I/O多路复用
+
+                rectangle "ngx_kqueue_module.c" as KqueueMod<<file>>
+                note bottom of KqueueMod : BSD kqueue支持\nFreeBSD/macOS优化
+
+                rectangle "ngx_select_module.c" as SelectMod<<file>>
+                note bottom of SelectMod : select()支持\n跨平台兼容
+
+                rectangle "ngx_poll_module.c" as PollMod<<file>>
+                note bottom of PollMod : poll()支持\nLinux/Unix通用
+            }
+            
+            package "quic/" as QuicDir {
+                rectangle "ngx_event_quic.c" as QuicEvent<<file>>
+                note bottom of QuicEvent : QUIC事件处理\nHTTP/3支持
+            }
+        }
+        
+        ' HTTP处理
+        package "http/" as HTTPDir #F3E5F5 {
+            rectangle "ngx_http.c/.h" as HTTPMain<<file>>
+            note bottom of HTTPMain : HTTP模块主入口\n配置解析
+
+            rectangle "ngx_http_core_module.c" as HTTPCore<<file>>
+            note bottom of HTTPCore : HTTP核心模块\nserver/location配置
+
+            rectangle "ngx_http_request.c/.h" as HTTPRequest<<file>>
+            note bottom of HTTPRequest : 请求处理\nngx_http_request_t
+
+            rectangle "ngx_http_parse.c" as HTTPParse<<file>>
+            note bottom of HTTPParse : HTTP协议解析\n请求行/头部解析
+
+            rectangle "ngx_http_upstream.c/.h" as HTTPUpstream<<file>>
+            note bottom of HTTPUpstream : 反向代理核心\n负载均衡
+
+            package "modules/" as HTTPModules {
+                rectangle "ngx_http_static_module.c" as StaticMod<<file>>
+                note bottom of StaticMod : 静态文件服务\nsendfile优化
+
+                rectangle "ngx_http_index_module.c" as IndexMod<<file>>
+                note bottom of IndexMod : 索引页面处理\nindex指令
+
+                rectangle "ngx_http_proxy_module.c" as ProxyMod<<file>>
+                note bottom of ProxyMod : 反向代理模块\nproxy_pass指令
+
+                rectangle "ngx_http_fastcgi_module.c" as FastCGIMod<<file>>
+                note bottom of FastCGIMod : FastCGI协议\nPHP应用支持
+
+                rectangle "ngx_http_grpc_module.c" as GRPCMod<<file>>
+                note bottom of GRPCMod : gRPC协议支持\nHTTP/2 over gRPC
+
+                rectangle "ngx_http_ssl_module.c" as SSLMod<<file>>
+                note bottom of SSLMod : SSL/TLS支持\n证书管理
+
+                rectangle "ngx_http_gzip_module.c" as GzipMod<<file>>
+                note bottom of GzipMod : 内容压缩\ngzip算法
+
+                rectangle "ngx_http_access_module.c" as AccessMod<<file>>
+                note bottom of AccessMod : 访问控制\nallow/deny指令
+
+                rectangle "ngx_http_limit_req_module.c" as LimitReqMod<<file>>
+                note bottom of LimitReqMod : 请求速率限制\n漏桶算法
+
+                rectangle "ngx_http_upstream_*_module.c" as UpstreamMods<<file>>
+                note bottom of UpstreamMods : 负载均衡算法\nip_hash/least_conn等
+            }
+            
+            package "v2/" as HTTP2Dir {
+                rectangle "ngx_http_v2_module.c" as HTTP2Mod<<file>>
+                note bottom of HTTP2Mod : HTTP/2协议支持\n多路复用
+
+                rectangle "ngx_http_v2.c/.h" as HTTP2Core<<file>>
+                note bottom of HTTP2Core : HTTP/2核心实现\n帧处理
+            }
+            
+            package "v3/" as HTTP3Dir {
+                rectangle "ngx_http_v3_module.c" as HTTP3Mod<<file>>
+                note bottom of HTTP3Mod : HTTP/3协议支持\nQUIC传输
+
+                rectangle "ngx_http_v3.c/.h" as HTTP3Core<<file>>
+                note bottom of HTTP3Core : HTTP/3核心实现\n0-RTT连接
+            }
+        }
+        
+        ' 流处理
+        package "stream/" as StreamDir #FFF8E1 {
+            rectangle "ngx_stream.c/.h" as StreamMain<<file>>
+            note bottom of StreamMain : Stream模块主入口\nTCP/UDP代理
+
+            rectangle "ngx_stream_core_module.c" as StreamCore<<file>>
+            note bottom of StreamCore : Stream核心模块\nserver配置
+
+            rectangle "ngx_stream_proxy_module.c" as StreamProxy<<file>>
+            note bottom of StreamProxy : TCP/UDP代理\n四层负载均衡
+
+            rectangle "ngx_stream_upstream.c" as StreamUpstream<<file>>
+            note bottom of StreamUpstream : Stream upstream\n后端服务器管理
+
+            rectangle "ngx_stream_ssl_module.c" as StreamSSL<<file>>
+            note bottom of StreamSSL : Stream SSL支持\n证书透传
+        }
+        
+        ' 邮件代理
+        package "mail/" as MailDir #FCE4EC {
+            rectangle "ngx_mail.c/.h" as MailMain<<file>>
+            note bottom of MailMain : Mail模块主入口\n邮件代理配置
+
+            rectangle "ngx_mail_core_module.c" as MailCore<<file>>
+            note bottom of MailCore : Mail核心模块\n协议选择
+
+            rectangle "ngx_mail_pop3_module.c" as POP3Mod<<file>>
+            note bottom of POP3Mod : POP3协议支持\n邮件接收
+
+            rectangle "ngx_mail_imap_module.c" as IMAPMod<<file>>
+            note bottom of IMAPMod : IMAP协议支持\n邮件管理
+
+            rectangle "ngx_mail_smtp_module.c" as SMTPMod<<file>>
+            note bottom of SMTPMod : SMTP协议支持\n邮件发送
+        }
+        
+        ' 操作系统相关
+        package "os/" as OSDir #FFEBEE {
+            package "unix/" as UnixDir {
+                rectangle "ngx_process_cycle.c" as ProcessCycle<<file>>
+                note bottom of ProcessCycle : 进程生命周期\nmaster/worker模式
+
+                rectangle "ngx_process.c/.h" as ProcessFiles<<file>>
+                note bottom of ProcessFiles : 进程管理\n信号处理
+
+                rectangle "ngx_channel.c/.h" as ChannelFiles<<file>>
+                note bottom of ChannelFiles : 进程间通信\nsocketpair通道
+
+                rectangle "ngx_daemon.c" as DaemonFile<<file>>
+                note bottom of DaemonFile : 守护进程化\n后台运行
+
+                rectangle "ngx_setaffinity.c" as AffinityFile<<file>>
+                note bottom of AffinityFile : CPU亲和性\n性能优化
+            }
+            
+            package "win32/" as Win32Dir {
+                rectangle "ngx_process_cycle.c" as Win32ProcessCycle<<file>>
+                note bottom of Win32ProcessCycle : Windows进程管理\n线程模式
+
+                rectangle "ngx_service.c" as ServiceFile<<file>>
+                note bottom of ServiceFile : Windows服务\n系统集成
+            }
+        }
+        
+        ' 杂项模块
+        package "misc/" as MiscDir {
+            rectangle "ngx_cpp_test_module.cpp" as CppTest<<file>>
+            note bottom of CppTest : C++兼容性测试\n编译验证
+
+            rectangle "ngx_google_perftools_module.c" as PerfTools<<file>>
+            note bottom of PerfTools : 性能分析工具\nGoogle Perftools集成
+        }
+    }
+    
+    ' 构建系统
+    package "auto/" as AutoDir #F1F8E9 {
+        rectangle "configure" as ConfigureScript<<file>>
+        note bottom of ConfigureScript : 配置脚本\n自动生成Makefile
+
+        package "cc/" as CCDir {
+            rectangle "gcc" as GCCConf<<file>>
+            note bottom of GCCConf : GCC编译器配置\n编译选项
+
+            rectangle "clang" as ClangConf<<file>>
+            note bottom of ClangConf : Clang编译器配置\n现代C编译器
+        }
+        
+        package "lib/" as LibDir {
+            rectangle "openssl/" as OpenSSLConf<<file>>
+            note bottom of OpenSSLConf : OpenSSL库配置\nSSL/TLS支持
+
+            rectangle "pcre/" as PCREConf<<file>>
+            note bottom of PCREConf : PCRE库配置\n正则表达式
+
+            rectangle "zlib/" as ZlibConf<<file>>
+            note bottom of ZlibConf : Zlib库配置\n压缩支持
+        }
+        
+        package "os/" as AutoOSDir {
+            rectangle "linux" as LinuxConf<<file>>
+            note bottom of LinuxConf : Linux系统配置\n特性检测
+
+            rectangle "freebsd" as FreeBSDConf<<file>>
+            note bottom of FreeBSDConf : FreeBSD系统配置\nkqueue支持
+
+            rectangle "darwin" as DarwinConf<<file>>
+            note bottom of DarwinConf : macOS系统配置\nkqueue支持
+        }
+    }
+    
+    ' 配置文件
+    package "conf/" as ConfDir {
+        rectangle "nginx.conf" as DefaultConf<<file>>
+        note bottom of DefaultConf : 默认配置文件\n配置示例
+
+        rectangle "mime.types" as MimeTypes<<file>>
+        note bottom of MimeTypes : MIME类型定义\n文件类型映射
+    }
+    
+    ' 贡献工具
+    package "contrib/" as ContribDir {
+        rectangle "README" as ContribReadme<<file>>
+        note bottom of ContribReadme : 贡献工具说明\n第三方脚本
+    }
+}
+
+' 关键依赖关系
+NginxMain --> CycleFiles : 初始化
+CycleFiles --> ModuleFiles : 加载模块
+ModuleFiles --> EventCore : 事件模块
+ModuleFiles --> HTTPMain : HTTP模块
+EventCore --> EpollMod : Linux
+EventCore --> KqueueMod : BSD/macOS
+HTTPMain --> HTTPCore : 核心功能
+HTTPCore --> HTTPRequest : 请求处理
+HTTPRequest --> HTTPParse : 协议解析
+HTTPCore --> ProxyMod : 反向代理
+ProxyMod --> HTTPUpstream : 负载均衡
+ProcessCycle --> EventCore : 事件循环
+
+@enduml

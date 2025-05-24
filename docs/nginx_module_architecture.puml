@@ -1,0 +1,401 @@
+@startuml nginx_module_architecture
+!theme plain
+title NGINX 模块架构详图
+
+' 定义样式
+!define CORE_COLOR #E3F2FD
+!define HTTP_COLOR #F3E5F5
+!define EVENT_COLOR #E8F5E8
+!define STREAM_COLOR #FFF8E1
+!define MAIL_COLOR #FCE4EC
+
+' 核心模块层
+package "核心模块层 (Core Modules)" as CoreLayer {
+    class "ngx_core_module" as CoreModule #CORE_COLOR {
+        + worker_processes
+        + error_log
+        + pid
+        + user
+        + group
+        --
+        📁 src/core/ngx_core.c
+    }
+
+    class "ngx_errlog_module" as ErrlogModule #CORE_COLOR {
+        + error_log配置
+        + 日志级别管理
+        --
+        📁 src/core/ngx_errlog_module.c
+    }
+
+    class "ngx_conf_module" as ConfModule #CORE_COLOR {
+        + include指令
+        + 配置文件解析
+        --
+        📁 src/core/ngx_conf_file.c
+    }
+
+    class "ngx_regex_module" as RegexModule #CORE_COLOR {
+        + 正则表达式支持
+        + PCRE库集成
+        --
+        📁 src/core/ngx_regex.c
+    }
+
+    class "ngx_thread_pool_module" as ThreadPoolModule #CORE_COLOR {
+        + 线程池管理
+        + 异步文件I/O
+        --
+        📁 src/core/ngx_thread_pool.c
+    }
+}
+
+' 事件模块层
+package "事件模块层 (Event Modules)" as EventLayer {
+    class "ngx_events_module" as EventsModule #EVENT_COLOR {
+        + events配置块
+        + 事件模型选择
+        --
+        📁 src/event/ngx_event.c
+    }
+
+    class "ngx_event_core_module" as EventCoreModule #EVENT_COLOR {
+        + worker_connections
+        + use指令
+        + 事件驱动核心
+        --
+        📁 src/event/ngx_event.c
+    }
+
+    class "ngx_epoll_module" as EpollModule #EVENT_COLOR {
+        + Linux epoll支持
+        + 边缘触发模式
+        --
+        📁 src/event/modules/ngx_epoll_module.c
+    }
+
+    class "ngx_kqueue_module" as KqueueModule #EVENT_COLOR {
+        + BSD kqueue支持
+        + 高效事件通知
+        --
+        📁 src/event/modules/ngx_kqueue_module.c
+    }
+
+    class "ngx_select_module" as SelectModule #EVENT_COLOR {
+        + select()系统调用
+        + 跨平台兼容
+        --
+        📁 src/event/modules/ngx_select_module.c
+    }
+}
+
+' HTTP模块层
+package "HTTP模块层 (HTTP Modules)" as HTTPLayer {
+    ' HTTP核心
+    class "ngx_http_module" as HTTPModule #HTTP_COLOR {
+        + http配置块
+        + HTTP上下文管理
+        --
+        📁 src/http/ngx_http.c
+    }
+
+    class "ngx_http_core_module" as HTTPCoreModule #HTTP_COLOR {
+        + server配置
+        + location配置
+        + 请求路由
+        --
+        📁 src/http/ngx_http_core_module.c
+    }
+
+    ' HTTP处理模块
+    class "ngx_http_index_module" as IndexModule #HTTP_COLOR {
+        + index指令
+        + 默认页面处理
+        --
+        📁 src/http/modules/ngx_http_index_module.c
+    }
+
+    class "ngx_http_static_module" as StaticModule #HTTP_COLOR {
+        + 静态文件服务
+        + sendfile优化
+        --
+        📁 src/http/modules/ngx_http_static_module.c
+    }
+
+    class "ngx_http_gzip_module" as GzipModule #HTTP_COLOR {
+        + 内容压缩
+        + 压缩级别控制
+        --
+        📁 src/http/modules/ngx_http_gzip_module.c
+    }
+
+    ' 代理模块
+    class "ngx_http_proxy_module" as ProxyModule #HTTP_COLOR {
+        + 反向代理
+        + proxy_pass指令
+        + 请求转发
+        --
+        📁 src/http/modules/ngx_http_proxy_module.c
+    }
+
+    class "ngx_http_upstream_module" as UpstreamModule #HTTP_COLOR {
+        + upstream配置
+        + 负载均衡
+        + 健康检查
+        --
+        📁 src/http/ngx_http_upstream.c
+    }
+
+    class "ngx_http_fastcgi_module" as FastCGIModule #HTTP_COLOR {
+        + FastCGI协议
+        + PHP应用支持
+        --
+        📁 src/http/modules/ngx_http_fastcgi_module.c
+    }
+
+    class "ngx_http_grpc_module" as GRPCModule #HTTP_COLOR {
+        + gRPC协议支持
+        + HTTP/2 over gRPC
+        --
+        📁 src/http/modules/ngx_http_grpc_module.c
+    }
+
+    ' 负载均衡模块
+    class "ngx_http_upstream_ip_hash_module" as IPHashModule #HTTP_COLOR {
+        + IP哈希算法
+        + 会话保持
+        --
+        📁 src/http/modules/ngx_http_upstream_ip_hash_module.c
+    }
+
+    class "ngx_http_upstream_hash_module" as HashModule #HTTP_COLOR {
+        + 一致性哈希
+        + 自定义哈希键
+        --
+        📁 src/http/modules/ngx_http_upstream_hash_module.c
+    }
+
+    class "ngx_http_upstream_least_conn_module" as LeastConnModule #HTTP_COLOR {
+        + 最少连接算法
+        + 连接数统计
+        --
+        📁 src/http/modules/ngx_http_upstream_least_conn_module.c
+    }
+
+    ' 缓存模块
+    class "ngx_http_cache_module" as CacheModule #HTTP_COLOR {
+        + HTTP缓存
+        + 缓存控制头
+        --
+        📁 src/http/ngx_http_cache.h
+    }
+
+    class "ngx_http_file_cache_module" as FileCacheModule #HTTP_COLOR {
+        + 文件缓存
+        + 缓存清理
+        --
+        📁 src/http/ngx_http_file_cache.c
+    }
+
+    ' 安全模块
+    class "ngx_http_access_module" as AccessModule #HTTP_COLOR {
+        + IP访问控制
+        + allow/deny指令
+        --
+        📁 src/http/modules/ngx_http_access_module.c
+    }
+
+    class "ngx_http_auth_basic_module" as AuthBasicModule #HTTP_COLOR {
+        + HTTP基本认证
+        + 用户密码验证
+        --
+        📁 src/http/modules/ngx_http_auth_basic_module.c
+    }
+
+    class "ngx_http_limit_req_module" as LimitReqModule #HTTP_COLOR {
+        + 请求速率限制
+        + 漏桶算法
+        --
+        📁 src/http/modules/ngx_http_limit_req_module.c
+    }
+
+    class "ngx_http_limit_conn_module" as LimitConnModule #HTTP_COLOR {
+        + 连接数限制
+        + 并发控制
+        --
+        📁 src/http/modules/ngx_http_limit_conn_module.c
+    }
+
+    ' SSL模块
+    class "ngx_http_ssl_module" as SSLModule #HTTP_COLOR {
+        + SSL/TLS支持
+        + 证书配置
+        + SNI支持
+        --
+        📁 src/http/modules/ngx_http_ssl_module.c
+    }
+
+    ' HTTP/2和HTTP/3
+    class "ngx_http_v2_module" as HTTP2Module #HTTP_COLOR {
+        + HTTP/2协议
+        + 多路复用
+        + 服务器推送
+        --
+        📁 src/http/v2/ngx_http_v2_module.c
+    }
+
+    class "ngx_http_v3_module" as HTTP3Module #HTTP_COLOR {
+        + HTTP/3协议
+        + QUIC传输
+        + 0-RTT连接
+        --
+        📁 src/http/v3/ngx_http_v3_module.c
+    }
+
+    ' 过滤模块
+    class "ngx_http_header_filter_module" as HeaderFilterModule #HTTP_COLOR {
+        + 响应头过滤
+        + 头部修改
+        --
+        📁 src/http/ngx_http_header_filter_module.c
+    }
+
+    class "ngx_http_charset_filter_module" as CharsetFilterModule #HTTP_COLOR {
+        + 字符集转换
+        + 编码处理
+        --
+        📁 src/http/modules/ngx_http_charset_filter_module.c
+    }
+
+    class "ngx_http_sub_filter_module" as SubFilterModule #HTTP_COLOR {
+        + 内容替换
+        + 文本过滤
+        --
+        📁 src/http/modules/ngx_http_sub_filter_module.c
+    }
+}
+
+' Stream模块层
+package "Stream模块层 (Stream Modules)" as StreamLayer {
+    class "ngx_stream_module" as StreamModule #STREAM_COLOR {
+        + stream配置块
+        + TCP/UDP代理
+        --
+        📁 src/stream/ngx_stream.c
+    }
+
+    class "ngx_stream_core_module" as StreamCoreModule #STREAM_COLOR {
+        + server配置
+        + 流处理核心
+        --
+        📁 src/stream/ngx_stream_core_module.c
+    }
+
+    class "ngx_stream_proxy_module" as StreamProxyModule #STREAM_COLOR {
+        + TCP/UDP代理
+        + 负载均衡
+        --
+        📁 src/stream/ngx_stream_proxy_module.c
+    }
+
+    class "ngx_stream_upstream_module" as StreamUpstreamModule #STREAM_COLOR {
+        + upstream配置
+        + 后端服务器管理
+        --
+        📁 src/stream/ngx_stream_upstream.c
+    }
+
+    class "ngx_stream_ssl_module" as StreamSSLModule #STREAM_COLOR {
+        + SSL/TLS代理
+        + 证书透传
+        --
+        📁 src/stream/ngx_stream_ssl_module.c
+    }
+}
+
+' Mail模块层
+package "Mail模块层 (Mail Modules)" as MailLayer {
+    class "ngx_mail_module" as MailModule #MAIL_COLOR {
+        + mail配置块
+        + 邮件代理
+        --
+        📁 src/mail/ngx_mail.c
+    }
+
+    class "ngx_mail_core_module" as MailCoreModule #MAIL_COLOR {
+        + server配置
+        + 协议选择
+        --
+        📁 src/mail/ngx_mail_core_module.c
+    }
+
+    class "ngx_mail_pop3_module" as POP3Module #MAIL_COLOR {
+        + POP3协议支持
+        + 邮件接收
+        --
+        📁 src/mail/ngx_mail_pop3_module.c
+    }
+
+    class "ngx_mail_imap_module" as IMAPModule #MAIL_COLOR {
+        + IMAP协议支持
+        + 邮件管理
+        --
+        📁 src/mail/ngx_mail_imap_module.c
+    }
+
+    class "ngx_mail_smtp_module" as SMTPModule #MAIL_COLOR {
+        + SMTP协议支持
+        + 邮件发送
+        --
+        📁 src/mail/ngx_mail_smtp_module.c
+    }
+
+    class "ngx_mail_ssl_module" as MailSSLModule #MAIL_COLOR {
+        + 邮件SSL/TLS
+        + 安全传输
+        --
+        📁 src/mail/ngx_mail_ssl_module.c
+    }
+}
+
+' 模块关系
+CoreModule --> EventsModule : 初始化
+EventsModule --> EventCoreModule : 配置
+EventCoreModule --> EpollModule : Linux
+EventCoreModule --> KqueueModule : BSD
+EventCoreModule --> SelectModule : 通用
+
+HTTPModule --> HTTPCoreModule : 核心功能
+HTTPCoreModule --> StaticModule : 静态文件
+HTTPCoreModule --> IndexModule : 索引页面
+HTTPCoreModule --> ProxyModule : 反向代理
+
+ProxyModule --> UpstreamModule : 后端管理
+UpstreamModule --> IPHashModule : 负载均衡
+UpstreamModule --> HashModule : 负载均衡
+UpstreamModule --> LeastConnModule : 负载均衡
+
+HTTPCoreModule --> SSLModule : 安全传输
+HTTPCoreModule --> HTTP2Module : 协议升级
+HTTPCoreModule --> HTTP3Module : 协议升级
+
+HTTPCoreModule --> AccessModule : 访问控制
+HTTPCoreModule --> LimitReqModule : 速率限制
+HTTPCoreModule --> LimitConnModule : 连接限制
+
+StreamModule --> StreamCoreModule : 核心功能
+StreamCoreModule --> StreamProxyModule : 代理功能
+StreamProxyModule --> StreamUpstreamModule : 后端管理
+
+MailModule --> MailCoreModule : 核心功能
+MailCoreModule --> POP3Module : 协议支持
+MailCoreModule --> IMAPModule : 协议支持
+MailCoreModule --> SMTPModule : 协议支持
+
+note top of CoreLayer : 提供基础功能和配置管理
+note top of EventLayer : 处理网络事件和I/O多路复用
+note top of HTTPLayer : 处理HTTP协议和Web服务功能
+note top of StreamLayer : 处理TCP/UDP流量代理
+note top of MailLayer : 处理邮件协议代理
+
+@enduml

@@ -1,0 +1,205 @@
+@startuml epoll in NGINX
+
+' 使用皮肤
+skinparam {
+  DefaultFontName "Arial"
+  BackgroundColor white
+  ArrowColor black
+  BorderColor black
+}
+
+autonumber
+
+' 定义参与者
+participant "NGINX Master" as master #lightblue
+participant "NGINX Worker" as worker #lightgreen
+participant "epoll API" as epoll #orange
+participant "Linux Kernel" as kernel #lightgray
+participant "Client" as client #pink
+
+' 定义注释
+note over epoll
+  Linux epoll API:
+  - epoll_create()
+  - epoll_ctl()
+  - epoll_wait()
+end note
+
+note over worker
+  src/event/modules/ngx_epoll_module.c
+  - ngx_epoll_init()
+  - ngx_epoll_add_event()
+  - ngx_epoll_process_events()
+end note
+
+' 初始化阶段
+== 1. 初始化阶段 ==
+
+master -> worker : 创建工作进程
+
+worker -> epoll : epoll_create()
+note right
+  创建 epoll 实例
+  ep = epoll_create(cycle->connection_n / 2);
+end note
+
+epoll -> kernel : 创建 epoll 实例
+kernel --> epoll : 返回 epoll 文件描述符
+epoll --> worker : 返回 epoll 文件描述符
+
+worker -> worker : 分配事件列表内存
+note right
+  event_list = ngx_alloc(sizeof(struct epoll_event) * epcf->events, cycle->log);
+end note
+
+worker -> worker : 设置事件标志
+note right
+  ngx_event_flags = NGX_USE_CLEAR_EVENT|NGX_USE_GREEDY_EVENT|NGX_USE_EPOLL_EVENT;
+end note
+
+' 监听套接字设置阶段
+== 2. 监听套接字设置阶段 ==
+
+worker -> epoll : epoll_ctl(EPOLL_CTL_ADD, listen_fd, ...)
+note right
+  添加监听套接字
+  ee.events = EPOLLIN|EPOLLRDHUP;
+  ee.data.ptr = (void *) ((uintptr_t) c | ev->instance);
+end note
+
+epoll -> kernel : 注册监听套接字事件
+kernel --> epoll : 操作结果
+epoll --> worker : 操作结果
+
+' 事件循环阶段
+== 3. 事件循环阶段 ==
+
+loop
+  worker -> epoll : epoll_wait(ep, event_list, nevents, timer)
+  note right
+    等待事件发生
+    events = epoll_wait(ep, event_list, (int) nevents, timer);
+  end note
+  
+  epoll -> kernel : 等待事件
+  
+  ' 新连接到达
+  client -> kernel : 新连接请求
+  kernel --> epoll : 返回就绪事件
+  epoll --> worker : 返回就绪事件列表
+  
+  worker -> worker : 处理就绪事件
+  note right
+    for (i = 0; i < events; i++) {
+        c = event_list[i].data.ptr;
+        instance = (uintptr_t) c & 1;
+        c = (ngx_connection_t *) ((uintptr_t) c & (uintptr_t) ~1);
+        // 处理事件...
+    }
+  end note
+  
+  ' 接受新连接
+  alt 监听套接字就绪
+    worker -> kernel : accept() 接受新连接
+    kernel --> worker : 返回新连接套接字
+    
+    worker -> epoll : epoll_ctl(EPOLL_CTL_ADD, conn_fd, ...)
+    note right
+      添加新连接到 epoll
+      ee.events = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLRDHUP;
+      ee.data.ptr = (void *) ((uintptr_t) c | c->read->instance);
+    end note
+    
+    epoll -> kernel : 注册新连接事件
+    kernel --> epoll : 操作结果
+    epoll --> worker : 操作结果
+  end
+  
+  ' 处理客户端数据
+  alt 客户端数据就绪
+    client -> kernel : 发送数据
+    kernel -> worker : 触发读事件
+    
+    worker -> worker : 处理读事件
+    note right
+      if ((revents & EPOLLIN) && rev->active) {
+          rev->ready = 1;
+          rev->handler(rev);
+      }
+    end note
+    
+    worker -> client : 处理请求并响应
+  end
+  
+  ' 处理连接关闭
+  alt 客户端关闭连接
+    client -> kernel : 关闭连接
+    kernel -> worker : 触发 EPOLLRDHUP 事件
+    
+    worker -> worker : 标记连接待关闭
+    note right
+      if (revents & EPOLLRDHUP) {
+          rev->pending_eof = 1;
+      }
+    end note
+    
+    worker -> epoll : epoll_ctl(EPOLL_CTL_DEL, conn_fd, ...)
+    epoll -> kernel : 移除连接事件
+    kernel --> epoll : 操作结果
+    epoll --> worker : 操作结果
+    
+    worker -> kernel : close() 关闭连接
+  end
+end
+
+' 边缘触发与水平触发对比
+== 4. 边缘触发与水平触发对比 ==
+
+group #lightblue 水平触发 (Level Triggered)
+  client -> kernel : 发送部分数据
+  kernel -> worker : 触发读事件
+  worker -> kernel : 读取部分数据
+  note right: 没有读完所有数据
+  
+  worker -> epoll : epoll_wait()
+  epoll -> kernel : 等待事件
+  kernel --> epoll : 再次返回读事件
+  epoll --> worker : 再次通知读事件就绪
+  
+  worker -> kernel : 读取剩余数据
+end
+
+group #lightyellow 边缘触发 (Edge Triggered)
+  client -> kernel : 发送部分数据
+  kernel -> worker : 触发读事件
+  worker -> kernel : 读取部分数据
+  note right: 没有读完所有数据
+  
+  worker -> epoll : epoll_wait()
+  epoll -> kernel : 等待事件
+  kernel --> epoll : 不返回读事件
+  epoll --> worker : 不通知读事件就绪
+  
+  note over worker, kernel #pink: 在边缘触发模式下，必须一次性读取所有数据
+end
+
+' 高效处理大量连接
+== 5. 高效处理大量连接 ==
+
+group #lightgray 传统 select/poll
+  worker -> kernel : select/poll(all_fds)
+  note right: 每次都要传递所有文件描述符
+  kernel -> kernel : 检查所有文件描述符
+  note right: O(n) 时间复杂度
+  kernel --> worker : 返回就绪文件描述符
+end
+
+group  #lightgreen epoll
+  worker -> kernel : epoll_wait()
+  note right: 不需要传递文件描述符列表
+  kernel -> kernel : 只检查就绪的文件描述符
+  note right: O(1) 时间复杂度
+  kernel --> worker : 返回就绪事件
+end
+
+@enduml

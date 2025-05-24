@@ -1,0 +1,181 @@
+@startuml nginx_architecture
+!theme plain
+title NGINX 架构图
+
+' 进程层
+rectangle "Master" as master #FFEBEE
+rectangle "Worker1" as worker1 #FFEBEE
+rectangle "Worker2" as worker2 #FFEBEE
+rectangle "WorkerN" as workerN #FFEBEE
+rectangle "CacheManager" as cacheManager #FFEBEE
+rectangle "CacheLoader" as cacheLoader #FFEBEE
+
+master --> worker1
+master --> worker2
+master --> workerN
+master --> cacheManager
+master --> cacheLoader
+
+' 核心系统
+package "核心系统 (Core System)" as CoreSystem {
+    rectangle "生命周期管理\n(ngx_cycle_t)\n----\n📁 src/core/ngx_cycle.c\n📁 src/core/ngx_cycle.h" as Cycle #E1F5FE
+    rectangle "模块系统\n(ngx_module_t)\n----\n📁 src/core/ngx_module.c\n📁 src/core/ngx_module.h" as ModuleSystem #E1F5FE
+    rectangle "配置系统\n(ngx_conf_t)" as ConfigSystem #E1F5FE {
+        note bottom : 📁 src/core/ngx_conf_file.c\n📁 src/core/ngx_conf_file.h
+    }
+    rectangle "连接管理\n(ngx_connection_t)" as ConnectionMgmt #E1F5FE {
+        note bottom : 📁 src/core/ngx_connection.c\n📁 src/core/ngx_connection.h
+    }
+    rectangle "内存池\n(ngx_pool_t)" as MemoryPool #E1F5FE {
+        note bottom : 📁 src/core/ngx_palloc.c\n📁 src/core/ngx_palloc.h
+    }
+    rectangle "日志系统\n(ngx_log_t)" as LogSystem #E1F5FE {
+        note bottom : 📁 src/core/ngx_log.c\n📁 src/core/ngx_log.h
+    }
+}
+
+' 事件系统
+package "事件处理系统" as EventSystem {
+    rectangle "事件循环" as EventLoop #FFECB3 {
+        note bottom : 📁 src/event/ngx_event.c\n📁 src/os/unix/ngx_process_cycle.c
+    }
+    rectangle "I/O多路复用" as IOMultiplex #FFECB3 {
+        rectangle "epoll (Linux)" as Epoll {
+            note bottom : 📁 src/event/modules/ngx_epoll_module.c
+        }
+        rectangle "kqueue (BSD)" as Kqueue {
+            note bottom : 📁 src/event/modules/ngx_kqueue_module.c
+        }
+        rectangle "select" as Select {
+            note bottom : 📁 src/event/modules/ngx_select_module.c
+        }
+    }
+    rectangle "定时器管理" as TimerMgmt #FFECB3 {
+        note bottom : 📁 src/event/ngx_event_timer.c
+    }
+    rectangle "信号处理" as SignalHandler #FFECB3 {
+        note bottom : 📁 src/os/unix/ngx_process.c
+    }
+}
+
+' HTTP系统
+package "HTTP处理系统" as HTTPSystem {
+    rectangle "HTTP核心" as HTTPCore #C8E6C9 {
+        rectangle "请求解析" as RequestParser {
+            note bottom : 📁 src/http/ngx_http_parse.c
+        }
+        rectangle "响应生成" as ResponseGen {
+            note bottom : 📁 src/http/ngx_http_core_module.c
+        }
+        rectangle "头部处理" as HeaderProc {
+            note bottom : 📁 src/http/ngx_http_header_filter_module.c
+        }
+    }
+
+    rectangle "HTTP模块" as HTTPModules #C8E6C9 {
+        rectangle "Handler模块" as HandlerMods {
+            note bottom : 📁 src/http/modules/
+        }
+        rectangle "Filter模块" as FilterMods {
+            note bottom : 📁 src/http/modules/
+        }
+        rectangle "Upstream模块" as UpstreamMods {
+            note bottom : 📁 src/http/ngx_http_upstream.c
+        }
+    }
+
+    rectangle "协议支持" as ProtocolSupport #C8E6C9 {
+        rectangle "HTTP/1.x" as HTTP1 {
+            note bottom : 📁 src/http/ngx_http_request.c
+        }
+        rectangle "HTTP/2" as HTTP2 {
+            note bottom : 📁 src/http/v2/
+        }
+        rectangle "HTTP/3 (QUIC)" as HTTP3 {
+            note bottom : 📁 src/http/v3/
+        }
+    }
+}
+
+' 功能模块
+package "功能模块" as FunctionalModules {
+    rectangle "负载均衡" as LoadBalancer #D1C4E9 {
+        rectangle "Round Robin" as RR
+        rectangle "IP Hash" as IPHash
+        rectangle "Least Conn" as LeastConn
+        rectangle "Consistent Hash" as ConsistentHash
+    }
+
+    rectangle "缓存系统" as CacheSystem #D1C4E9 {
+        rectangle "文件缓存" as FileCache
+        rectangle "内存缓存" as MemCache
+        rectangle "缓存键管理" as CacheKeyMgmt
+    }
+
+    rectangle "SSL/TLS" as SSL #D1C4E9 {
+        rectangle "SSL终端" as SSLTermination
+        rectangle "证书管理" as CertMgmt
+        rectangle "SNI支持" as SNI
+    }
+
+    rectangle "安全模块" as Security #D1C4E9 {
+        rectangle "访问控制" as AccessControl
+        rectangle "速率限制" as RateLimit
+        rectangle "防火墙" as Firewall
+    }
+}
+
+' 其他模块
+package "其他模块" as OtherModules {
+    rectangle "Mail模块" as MailModule #D1C4E9
+    rectangle "Stream模块" as StreamModule #D1C4E9
+    rectangle "第三方模块" as ThirdPartyMods #D1C4E9
+}
+
+' 配置和构建
+package "配置与构建" as ConfigBuild {
+    rectangle "配置文件\n(nginx.conf)" as ConfigFile #FFCDD2
+    rectangle "构建系统\n(auto/)" as BuildSystem #FFCDD2
+    rectangle "动态模块\n加载" as DynamicModules #FFCDD2
+}
+
+' 连接关系
+worker1 --> EventLoop
+worker2 --> EventLoop
+workerN --> EventLoop
+
+EventLoop --> IOMultiplex
+EventLoop --> TimerMgmt
+EventLoop --> SignalHandler
+
+EventLoop --> HTTPCore
+HTTPCore --> HTTPModules
+HTTPCore --> ProtocolSupport
+
+HTTPModules --> LoadBalancer
+HTTPModules --> CacheSystem
+HTTPModules --> SSL
+HTTPModules --> Security
+
+ModuleSystem --> HTTPModules
+ModuleSystem --> MailModule
+ModuleSystem --> StreamModule
+ModuleSystem --> ThirdPartyMods
+
+ConfigSystem --> ConfigFile
+ConfigSystem --> DynamicModules
+
+Cycle --> ModuleSystem
+Cycle --> ConfigSystem
+Cycle --> ConnectionMgmt
+Cycle --> MemoryPool
+Cycle --> LogSystem
+
+master --> ConfigFile
+master --> BuildSystem
+
+' 连接关系和数据流
+note top of master : 客户端请求流入
+note bottom of Security : 响应数据流出
+
+@enduml

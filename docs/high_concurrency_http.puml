@@ -1,0 +1,251 @@
+@startuml NGINX High Concurrency HTTP Processing
+
+' 使用皮肤
+skinparam {
+  DefaultFontName "Arial"
+  BackgroundColor white
+  ArrowColor black
+  BorderColor black
+}
+
+autonumber
+
+' 定义参与者
+actor "Client" as client
+participant "Master Process" as master #lightblue
+participant "Worker Process 1" as worker1 #lightgreen
+participant "Worker Process 2" as worker2 #lightgreen
+participant "Worker Process N" as workerN #lightgreen
+participant "Connection Pool" as pool #lightyellow
+participant "Event Loop" as event #orange
+participant "HTTP Handler" as http #pink
+
+' 定义注释
+note over master
+  src/os/unix/ngx_process_cycle.c
+  ngx_master_process_cycle()
+end note
+
+note over worker1, workerN
+  src/os/unix/ngx_process_cycle.c
+  ngx_worker_process_cycle()
+end note
+
+note over pool
+  src/event/ngx_event.c
+  ngx_event_process_init()
+end note
+
+note over event
+  src/event/modules/ngx_epoll_module.c
+  ngx_epoll_process_events()
+end note
+
+note over http
+  src/http/ngx_http_request.c
+  ngx_http_process_request()
+end note
+
+' 初始化阶段
+== 1. 初始化阶段 ==
+
+master -> master : 读取配置文件
+note right
+  worker_processes 4;
+  worker_connections 1024;
+  use epoll;
+  ...
+end note
+
+master -> worker1 : 创建工作进程
+master -> worker2 : 创建工作进程
+master -> workerN : 创建工作进程
+
+worker1 -> pool : 初始化连接池
+note right
+  预分配 worker_connections 个连接对象
+  每个连接包含读写事件
+end note
+
+worker1 -> event : 初始化事件循环
+note right
+  创建 epoll 实例
+  注册监听套接字事件
+end note
+
+' 连接处理阶段
+== 2. 连接处理阶段 ==
+
+client -> master : 新连接请求
+
+group #lightgray 互斥锁竞争
+  worker1 -> worker1 : 尝试获取 accept_mutex
+  note right
+    src/event/ngx_event_accept.c
+    ngx_trylock_accept_mutex()
+  end note
+  
+  worker2 -> worker2 : 尝试获取 accept_mutex
+  workerN -> workerN : 尝试获取 accept_mutex
+end group
+
+worker1 -> worker1 : 获得 accept_mutex
+worker1 -> client : accept() 接受连接
+note right
+  src/event/ngx_event_accept.c
+  ngx_event_accept()
+end note
+
+worker1 -> pool : 获取连接对象
+note right
+  src/core/ngx_connection.c
+  ngx_get_connection()
+end note
+
+worker1 -> worker1 : 设置非阻塞模式
+worker1 -> http : 初始化 HTTP 连接
+note right
+  src/http/ngx_http_request.c
+  ngx_http_init_connection()
+end note
+
+' 请求处理阶段
+== 3. 请求处理阶段 ==
+
+client -> worker1 : 发送 HTTP 请求
+
+worker1 -> event : 触发读事件
+note right
+  src/event/modules/ngx_epoll_module.c
+  epoll_wait() 返回可读事件
+end note
+
+event -> http : 调用读事件处理函数
+note right
+  src/http/ngx_http_request.c
+  ngx_http_wait_request_handler()
+end note
+
+http -> http : 读取请求行
+note right
+  src/http/ngx_http_request.c
+  ngx_http_process_request_line()
+end note
+
+http -> http : 读取请求头
+note right
+  src/http/ngx_http_request.c
+  ngx_http_process_request_headers()
+end note
+
+http -> http : 创建请求对象
+note right
+  src/http/ngx_http_request.c
+  ngx_http_create_request()
+end note
+
+' 请求处理阶段
+== 4. 请求处理阶段 ==
+
+http -> http : 处理请求
+note right
+  src/http/ngx_http_core_module.c
+  ngx_http_handler()
+end note
+
+group #lightgray 请求处理阶段
+  http -> http : POST_READ 阶段
+  http -> http : SERVER_REWRITE 阶段
+  http -> http : FIND_CONFIG 阶段
+  http -> http : REWRITE 阶段
+  http -> http : POST_REWRITE 阶段
+  http -> http : PREACCESS 阶段
+  http -> http : ACCESS 阶段
+  http -> http : POST_ACCESS 阶段
+  http -> http : PRECONTENT 阶段
+  http -> http : CONTENT 阶段
+  note right
+    src/http/ngx_http_core_module.c
+    ngx_http_core_run_phases()
+  end note
+end group
+
+' 响应处理阶段
+== 5. 响应处理阶段 ==
+
+http -> http : 生成响应头
+note right
+  src/http/ngx_http_header_filter_module.c
+  ngx_http_header_filter()
+end note
+
+http -> http : 生成响应体
+note right
+  src/http/ngx_http_core_module.c
+  ngx_http_output_filter()
+end note
+
+group #lightgray 响应过滤链
+  http -> http : 头部过滤器
+  http -> http : 压缩过滤器
+  http -> http : 字符集过滤器
+  http -> http : 分块过滤器
+  http -> http : 写入过滤器
+  note right
+    src/http/ngx_http_write_filter_module.c
+    ngx_http_write_filter()
+  end note
+end group
+
+worker1 -> client : 发送 HTTP 响应
+
+' 连接完成阶段
+== 6. 连接完成阶段 ==
+
+alt 保持连接
+  worker1 -> pool : 重置连接状态
+  note right
+    src/http/ngx_http_request.c
+    ngx_http_set_keepalive()
+  end note
+  worker1 -> event : 等待下一个请求
+else 关闭连接
+  worker1 -> pool : 释放连接对象
+  note right
+    src/http/ngx_http_request.c
+    ngx_http_free_request()
+  end note
+  worker1 -> client : 关闭连接
+end
+
+' 高并发场景
+== 7. 高并发场景 ==
+
+group #lightgray 负载均衡
+  worker1 -> worker1 : 连接数增加
+  note right
+    ngx_accept_disabled = total_connections / 8 - free_connections
+  end note
+  
+  worker1 -> worker1 : 暂时不接受新连接
+  worker2 -> worker2 : 获取 accept_mutex
+  worker2 -> client : 接受新连接
+end group
+
+group #lightgray 连接限制
+  worker1 -> worker1 : 检测文件描述符耗尽
+  note right
+    src/event/ngx_event_accept.c
+    处理 EMFILE/ENFILE 错误
+  end note
+  
+  worker1 -> worker1 : 暂时禁用接受事件
+  note right
+    src/event/ngx_event_accept.c
+    ngx_disable_accept_events()
+  end note
+  
+  worker1 -> worker1 : 延迟接受新连接
+end group
+
+@enduml

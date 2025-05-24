@@ -1,0 +1,455 @@
+@startuml NGINX HTTP Processing Flow
+
+' 使用皮肤
+skinparam {
+  DefaultFontName "Arial"
+  BackgroundColor white
+  ArrowColor black
+  BorderColor black
+  ComponentStyle uml2
+  ComponentBackgroundColor #f0f0f0
+  NodeBackgroundColor #f0f0f0
+  DatabaseBackgroundColor #f0f0f0
+  PackageBackgroundColor #f8f8f8
+  PackageBorderColor #cccccc
+  ArrowFontSize 11
+  TitleFontSize 18
+  TitleFontColor #333333
+}
+
+' 定义标题
+'title NGINX HTTP 请求处理流程 - 结合 epoll 机制与高并发处理
+title NGINX HTTP 请求处理流程
+
+autonumber
+
+' 定义参与者
+actor "Client" as client
+participant "Master Process" as master #lightblue
+participant "Worker Process" as worker #lightgreen
+participant "Event Module\n(epoll)" as event #orange
+participant "Connection Pool" as pool #lightyellow
+participant "HTTP Module" as http #pink
+participant "Phase Handlers" as phase #lightcyan
+participant "Content Handlers" as content #lightpink
+participant "Filter Chain" as filter #lightgray
+participant "Linux Kernel" as kernel #whitesmoke
+
+' 定义注释
+note over master
+  src/os/unix/ngx_process_cycle.c
+  ngx_master_process_cycle()
+end note
+
+note over worker
+  src/os/unix/ngx_process_cycle.c
+  ngx_worker_process_cycle()
+end note
+
+note over event
+  src/event/modules/ngx_epoll_module.c
+  ngx_epoll_init()
+  ngx_epoll_process_events()
+end note
+
+note over http
+  src/http/ngx_http_request.c
+  ngx_http_init_connection()
+  ngx_http_process_request()
+end note
+
+note over phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_run_phases()
+end note
+
+note over filter
+  src/http/ngx_http_core_module.c
+  ngx_http_output_filter()
+end note
+
+' ===== 初始化阶段 =====
+== 1. 初始化阶段 ==
+
+master -> master : 读取配置文件
+note right
+  worker_processes 4;
+  worker_connections 1024;
+  events { use epoll; }
+  http { ... }
+end note
+
+master -> worker : 创建工作进程
+note right
+  ngx_spawn_process()
+end note
+
+worker -> event : 初始化 epoll
+note right
+  ep = epoll_create(cycle->connection_n / 2);
+  event_list = ngx_alloc(sizeof(struct epoll_event) * epcf->events, cycle->log);
+end note
+
+worker -> pool : 初始化连接池
+note right
+  cycle->connections = ngx_alloc(sizeof(ngx_connection_t) * cycle->connection_n, cycle->log);
+  cycle->free_connections = next;
+  cycle->free_connection_n = cycle->connection_n;
+end note
+
+worker -> event : 添加监听套接字
+note right
+  ngx_event_actions.add(rev, NGX_READ_EVENT, 0);
+end note
+
+' ===== 连接处理阶段 =====
+== 2. 连接处理阶段 ==
+
+worker -> event : 进入事件循环
+note right
+  ngx_process_events_and_timers()
+end note
+
+group #lightyellow 事件循环
+  worker -> event : 尝试获取 accept_mutex
+  note right
+    ngx_trylock_accept_mutex()
+  end note
+  
+  worker -> event : 等待事件
+  note right
+    events = epoll_wait(ep, event_list, (int) nevents, timer);
+  end note
+  
+  event -> kernel : epoll_wait()
+  
+  client -> kernel : 新连接请求
+  
+  kernel --> event : 返回就绪事件
+  event --> worker : 处理就绪事件
+  
+  worker -> worker : 遍历就绪事件
+  note right
+    for (i = 0; i < events; i++) {
+        c = event_list[i].data.ptr;
+        instance = (uintptr_t) c & 1;
+        c = (ngx_connection_t *) ((uintptr_t) c & (uintptr_t) ~1);
+        // 处理事件...
+    }
+  end note
+end group
+
+' ===== 接受连接阶段 =====
+== 3. 接受连接阶段 ==
+
+worker -> kernel : accept() 接受新连接
+note right
+  ngx_event_accept()
+  s = accept(lc->fd, &sa.sockaddr, &socklen);
+end note
+
+kernel --> worker : 返回客户端套接字
+
+worker -> pool : 获取连接对象
+note right
+  c = ngx_get_connection(s, ev->log);
+end note
+
+worker -> worker : 设置非阻塞模式
+note right
+  ngx_nonblocking(s)
+end note
+
+worker -> event : 添加连接到 epoll
+note right
+  ngx_epoll_add_connection()
+  ee.events = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLRDHUP;
+end note
+
+worker -> http : 初始化 HTTP 连接
+note right
+  ngx_http_init_connection()
+  rev->handler = ngx_http_wait_request_handler;
+end note
+
+' ===== 请求处理阶段 =====
+== 4. 请求处理阶段 ==
+
+client -> kernel : 发送 HTTP 请求
+kernel -> event : 触发读事件
+event -> worker : 通知读事件就绪
+
+worker -> http : 读取请求行
+note right
+  ngx_http_wait_request_handler()
+  ngx_http_process_request_line()
+end note
+
+worker -> http : 读取请求头
+note right
+  ngx_http_process_request_headers()
+end note
+
+worker -> http : 创建请求对象
+note right
+  r = ngx_http_create_request(c);
+end note
+
+worker -> http : 处理请求
+note right
+  ngx_http_process_request()
+  ngx_http_handler()
+end note
+
+' ===== 请求处理阶段 =====
+== 5. 请求处理阶段 ==
+
+http -> phase : 开始处理阶段
+note right
+  ngx_http_core_run_phases()
+end note
+
+group #lightcyan 请求处理阶段
+  phase -> phase : POST_READ 阶段
+  note right
+    ngx_http_core_generic_phase()
+  end note
+  
+  phase -> phase : SERVER_REWRITE 阶段
+  note right
+    ngx_http_core_rewrite_phase()
+    处理 rewrite 指令
+  end note
+  
+  phase -> phase : FIND_CONFIG 阶段
+  note right
+    ngx_http_core_find_config_phase()
+    查找匹配的 location
+  end note
+  
+  phase -> phase : REWRITE 阶段
+  note right
+    ngx_http_core_rewrite_phase()
+    处理 location 级别的 rewrite
+  end note
+  
+  phase -> phase : POST_REWRITE 阶段
+  note right
+    ngx_http_core_post_rewrite_phase()
+    如果 URI 改变，可能重新查找 location
+  end note
+  
+  phase -> phase : PREACCESS 阶段
+  note right
+    ngx_http_core_generic_phase()
+    限制请求速率等
+  end note
+  
+  phase -> phase : ACCESS 阶段
+  note right
+    ngx_http_core_access_phase()
+    访问控制，如 IP 限制、认证
+  end note
+  
+  phase -> phase : POST_ACCESS 阶段
+  note right
+    ngx_http_core_post_access_phase()
+  end note
+  
+  phase -> phase : PRECONTENT 阶段
+  note right
+    ngx_http_core_generic_phase()
+    try_files 等指令
+  end note
+  
+  phase -> content : CONTENT 阶段
+  note right
+    ngx_http_core_content_phase()
+  end note
+end group
+
+' ===== 内容生成阶段 =====
+== 6. 内容生成阶段 ==
+
+group #lightpink 内容处理器
+  alt 静态文件
+    content -> content : 静态文件处理
+    note right
+      ngx_http_static_handler()
+    end note
+  else 代理请求
+    content -> content : 代理请求处理
+    note right
+      ngx_http_proxy_handler()
+    end note
+  else FastCGI
+    content -> content : FastCGI 处理
+    note right
+      ngx_http_fastcgi_handler()
+    end note
+  else 其他处理器
+    content -> content : 其他内容处理器
+  end
+end group
+
+' ===== 响应过滤阶段 =====
+== 7. 响应过滤阶段 ==
+
+content -> filter : 发送响应头
+note right
+  ngx_http_send_header()
+  调用 ngx_http_top_header_filter
+end note
+
+group #lightgray 响应头过滤链
+  filter -> filter : 添加标准 HTTP 头
+  filter -> filter : 添加自定义头
+  filter -> filter : 处理特殊头
+end group
+
+content -> filter : 发送响应体
+note right
+  ngx_http_output_filter()
+  调用 ngx_http_top_body_filter
+end note
+
+group #lightgray 响应体过滤链
+  filter -> filter : 压缩过滤器
+  note right
+    ngx_http_gzip_filter()
+  end note
+  
+  filter -> filter : 分块过滤器
+  note right
+    ngx_http_chunked_filter()
+  end note
+  
+  filter -> filter : 写入过滤器
+  note right
+    ngx_http_write_filter()
+  end note
+end group
+
+' ===== 发送响应阶段 =====
+== 8. 发送响应阶段 ==
+
+filter -> event : 写入套接字
+note right
+  ngx_unix_send()
+end note
+
+event -> kernel : write() / writev()
+kernel -> client : 发送 HTTP 响应
+
+' ===== 请求完成阶段 =====
+== 9. 请求完成阶段 ==
+
+http -> http : 完成请求
+note right
+  ngx_http_finalize_request()
+end note
+
+alt 保持连接
+  http -> http : 重置连接状态
+  note right
+    ngx_http_set_keepalive()
+  end note
+  
+  http -> event : 等待下一个请求
+  note right
+    rev->handler = ngx_http_wait_request_handler;
+  end note
+else 关闭连接
+  http -> pool : 释放请求资源
+  note right
+    ngx_http_free_request()
+  end note
+  
+  http -> event : 从 epoll 中删除连接
+  note right
+    ngx_epoll_del_connection()
+  end note
+  
+  http -> kernel : 关闭连接
+  note right
+    ngx_close_socket(c->fd)
+  end note
+end
+
+' ===== 高并发处理机制 =====
+== 10. 高并发处理机制 ==
+
+group #lightyellow 负载均衡
+  worker -> worker : 计算 accept_disabled
+  note right
+    ngx_accept_disabled = total_connections / 8 - free_connections
+  end note
+  
+  alt 连接数过多
+    worker -> worker : 暂时不接受新连接
+    note right
+      if (ngx_accept_disabled > 0) {
+          ngx_accept_disabled--;
+          // 不尝试获取 accept_mutex
+      }
+    end note
+  else 连接数正常
+    worker -> worker : 尝试获取 accept_mutex
+    note right
+      ngx_trylock_accept_mutex()
+    end note
+  end
+end group
+
+group #lightpink 边缘触发优化
+  worker -> worker : 一次性读取所有数据
+  note right
+    在边缘触发模式下，必须一次性读取所有可用数据，
+    否则可能不会收到新的通知
+  end note
+  
+  worker -> worker : 处理 EAGAIN 错误
+  note right
+    if (n == -1 && ngx_errno == NGX_EAGAIN) {
+        // 已读取所有可用数据
+        return NGX_AGAIN;
+    }
+  end note
+end group
+
+group #lightcyan 事件批处理
+  worker -> worker : 延迟处理事件
+  note right
+    if (flags & NGX_POST_EVENTS) {
+        queue = rev->accept ? &ngx_posted_accept_events
+                            : &ngx_posted_events;
+        ngx_post_event(rev, queue);
+    }
+  end note
+  
+  worker -> worker : 批量处理延迟事件
+  note right
+    ngx_event_process_posted()
+  end note
+end group
+
+group #lightgray 连接限制保护
+  worker -> worker : 检测文件描述符耗尽
+  note right
+    if (err == NGX_EMFILE || err == NGX_ENFILE) {
+        // 文件描述符耗尽
+    }
+  end note
+  
+  worker -> worker : 暂时禁用接受事件
+  note right
+    ngx_disable_accept_events()
+  end note
+  
+  worker -> worker : 延迟接受新连接
+  note right
+    ngx_add_timer(ev, ecf->accept_mutex_delay)
+  end note
+end group
+
+@enduml

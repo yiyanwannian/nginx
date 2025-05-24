@@ -1,0 +1,54 @@
+@startuml NGINX Process Model
+
+' 使用皮肤
+skinparam {
+  DefaultFontName "Arial"
+  BackgroundColor white
+  ArrowColor black
+  BorderColor black
+}
+
+' 定义组件
+component "Master Process" as master
+component "Worker Process 1" as worker1
+component "Worker Process 2" as worker2
+component "Worker Process N" as workerN
+component "Cache Manager Process" as cacheManager
+component "Cache Loader Process" as cacheLoader
+
+' 定义关系
+master --> worker1 : 创建和管理
+master --> worker2 : 创建和管理
+master --> workerN : 创建和管理
+master --> cacheManager : 创建和管理
+master --> cacheLoader : 创建和管理
+
+' 添加注释
+note right of master
+  主进程：
+  - 读取配置
+  - 创建工作进程
+  - 处理信号
+  - 管理工作进程
+end note
+
+note right of worker1
+  工作进程：
+  - 接受连接
+  - 处理请求
+  - 处理响应
+end note
+
+note right of cacheManager
+  缓存管理器：
+  - 管理磁盘缓存
+  - 清理过期缓存
+end note
+
+note right of cacheLoader
+  缓存加载器：
+  - 启动时加载缓存
+  - 退出后不再运行
+end note
+
+@enduml

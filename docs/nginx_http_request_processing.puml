@@ -1,0 +1,77 @@
+@startuml NGINX HTTP Request Processing
+
+' 使用皮肤
+skinparam {
+  DefaultFontName "Arial"
+  BackgroundColor white
+  ArrowColor black
+  BorderColor black
+}
+
+' 定义状态
+state "客户端连接" as ClientConnection
+state "接受连接" as AcceptConnection
+state "读取请求" as ReadRequest
+state "处理请求头" as ProcessHeaders
+state "内容处理阶段" as ContentPhase {
+  state "查找位置" as FindLocation
+  state "访问控制" as AccessControl
+  state "处理请求" as ProcessRequest
+  state "内容生成" as GenerateContent
+}
+state "过滤响应" as FilterResponse {
+  state "头部过滤器" as HeaderFilter
+  state "内容过滤器" as ContentFilter
+}
+state "发送响应" as SendResponse
+state "关闭连接" as CloseConnection
+
+' 定义流程
+[*] --> ClientConnection
+ClientConnection --> AcceptConnection
+AcceptConnection --> ReadRequest
+ReadRequest --> ProcessHeaders
+ProcessHeaders --> FindLocation
+FindLocation --> AccessControl
+AccessControl --> ProcessRequest
+ProcessRequest --> GenerateContent
+GenerateContent --> HeaderFilter
+HeaderFilter --> ContentFilter
+ContentFilter --> SendResponse
+SendResponse --> CloseConnection : 如果不是长连接
+SendResponse --> ReadRequest : 如果是长连接
+CloseConnection --> [*]
+
+' 添加注释
+note right of AcceptConnection
+  由事件模块处理
+  (epoll/kqueue/select等)
+end note
+
+note right of ProcessHeaders
+  解析HTTP请求头
+  确定虚拟主机
+end note
+
+note right of FindLocation
+  根据URI匹配location
+  确定处理方式
+end note
+
+note right of ProcessRequest
+  可能是：
+  - 静态文件
+  - FastCGI/uWSGI
+  - 代理请求
+  - 其他处理器
+end note
+
+note right of FilterResponse
+  响应经过多个过滤器：
+  - 头部过滤器
+  - gzip压缩
+  - 字符集转换
+  - 其他过滤器
+end note
+
+@enduml

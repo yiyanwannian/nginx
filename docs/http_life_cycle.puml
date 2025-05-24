@@ -1,0 +1,215 @@
+@startuml HTTP Request Lifecycle in NGINX
+
+' 使用皮肤
+skinparam {
+  DefaultFontName "Arial"
+  BackgroundColor white
+  ArrowColor black
+  BorderColor black
+}
+
+title HTTP 请求在 NGINX 中的生命周期
+
+autonumber
+
+' 定义参与者
+participant "Client" as client
+participant "Connection Handler" as conn #lightblue
+participant "Request Parser" as parser #lightgreen
+participant "Phase Handler" as phase #lightyellow
+participant "Content Handler" as content #orange
+participant "Filter Chain" as filter #lightpink
+participant "Output Writer" as writer #lightgray
+
+' 定义生命周期
+== 1. 连接建立阶段 ==
+
+client -> conn : TCP 连接请求
+note right of conn
+  src/http/ngx_http.c
+  ngx_http_add_listening
+  ngx_http_init_connection
+end note
+
+conn -> conn : 初始化连接
+conn -> parser : 等待请求数据
+note right of parser
+  src/http/ngx_http_request.c
+  ngx_http_wait_request_handler
+end note
+
+== 2. 请求解析阶段 ==
+
+client -> parser : 发送 HTTP 请求
+parser -> parser : 解析请求行
+note right of parser
+  src/http/ngx_http_request.c
+  ngx_http_process_request_line
+  ngx_http_parse_request_line
+end note
+
+parser -> parser : 解析请求头
+note right of parser
+  src/http/ngx_http_request.c
+  ngx_http_process_request_headers
+  ngx_http_parse_header_line
+end note
+
+parser -> parser : 处理请求头
+note right of parser
+  src/http/ngx_http_request.c
+  ngx_http_process_request_header
+end note
+
+parser -> phase : 初始化请求处理
+note right of phase
+  src/http/ngx_http_request.c
+  ngx_http_process_request
+  ngx_http_handler
+end note
+
+== 3. 请求处理阶段 ==
+
+phase -> phase : POST_READ 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_generic_phase
+end note
+
+phase -> phase : SERVER_REWRITE 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_rewrite_phase
+end note
+
+phase -> phase : FIND_CONFIG 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_find_config_phase
+end note
+
+phase -> phase : REWRITE 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_rewrite_phase
+end note
+
+phase -> phase : POST_REWRITE 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_post_rewrite_phase
+end note
+
+phase -> phase : PREACCESS 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_generic_phase
+end note
+
+phase -> phase : ACCESS 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_access_phase
+end note
+
+phase -> phase : POST_ACCESS 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_post_access_phase
+end note
+
+phase -> phase : PRECONTENT 阶段
+note right of phase
+  src/http/ngx_http_core_module.c
+  ngx_http_core_generic_phase
+end note
+
+phase -> content : CONTENT 阶段
+note right of content
+  src/http/ngx_http_core_module.c
+  ngx_http_core_content_phase
+end note
+
+content -> content : 生成响应内容
+note right of content
+  - 静态文件服务
+  - 代理请求
+  - FastCGI 处理
+  - 其他内容处理器
+end note
+
+phase -> phase : LOG 阶段
+note right of phase
+  记录请求日志
+end note
+
+== 4. 响应生成和发送阶段 ==
+
+content -> filter : 发送响应头
+note right of filter
+  src/http/ngx_http_header_filter_module.c
+  ngx_http_header_filter
+end note
+
+filter -> filter : 响应头过滤链
+note right of filter
+  ngx_http_top_header_filter
+  - 添加标准 HTTP 头
+  - 添加自定义头
+  - 处理特殊头
+end note
+
+content -> filter : 发送响应体
+note right of filter
+  src/http/ngx_http_core_module.c
+  ngx_http_output_filter
+end note
+
+filter -> filter : 响应体过滤链
+note right of filter
+  ngx_http_top_body_filter
+  - 压缩
+  - 字符集转换
+  - 其他过滤器
+end note
+
+filter -> writer : 写入响应数据
+note right of writer
+  src/http/ngx_http_write_filter_module.c
+  ngx_http_write_filter
+end note
+
+writer -> client : 发送 HTTP 响应
+
+== 5. 请求完成阶段 ==
+
+content -> conn : 终结请求
+note right of conn
+  src/http/ngx_http_request.c
+  ngx_http_finalize_request
+end note
+
+conn -> conn : 清理请求资源
+note right of conn
+  src/http/ngx_http_request.c
+  ngx_http_free_request
+end note
+
+== 6. 连接处理 ==
+
+alt 保持连接
+  conn -> conn : 重置连接状态
+  note right of conn
+    src/http/ngx_http_request.c
+    ngx_http_set_keepalive
+  end note
+  conn -> parser : 准备处理下一个请求
+else 关闭连接
+  conn -> client : 关闭连接
+  note right of conn
+    src/http/ngx_http_request.c
+    ngx_http_close_connection
+  end note
+end
+
+@enduml
